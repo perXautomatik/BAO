@@ -162,6 +162,97 @@ function Get-ConfigParameters {
     return $params
 }
 
+# This script defines a function (_BureauDistant) for creating and controlling a remote desktop session using DWAgent.
+
+# Define the _BureauDistant function
+function _BureauDistant {
+
+    # Get the parameters from the config.ini file
+    $params = Get-ConfigParameters
+
+    # Check if the email address of the DWService account is specified
+    if ($params.sMailBD -ne "") {
+
+        # Check if the technical mode is off and if the DWAgent program exists on the system
+        if (($params.iModeTech -eq 0) -and (Test-Path -Path "$params.programFilesDir\$params.sAgent\runtime\dwagent.exe")) {
+
+            # Check if a cache file exists for RemoteDesktop
+            if (Test-Path -Path ".\Cache\BureauDistant") {
+
+                # Uninstall DWAgent
+                Uninstall-DWAgent -Params $params
+
+                # Change the state of the button to "Desactiver"
+                Change-ButtonState -ID $params.iIDAction -State "Desactiver"
+
+                # Write to the cache file that RemoteDesktop is disabled
+                Set-Content -Path ".\Cache\BureauDistant" -Value "-1"
+            }
+            else {
+
+                # Write to the log file that DWAgent is already installed and activate the button "Bureau Distant"
+                Write-Log -Message "DWAgent déjà installé, activation du bouton 'Bureau Distant'" -Log $params.hLog
+
+                # Write to the cache file that RemoteDesktop is enabled
+                Set-Content -Path ".\Cache\BureauDistant" -Value "1"
+
+                # Change the state of the button to "Activer"
+                Change-ButtonState -ID $params.iIDAction -State "Activer"
+
+                # Disable the background image
+                Disable-BackgroundImage
+            }
+        }
+        else {
+
+            # Check if the technical mode is off
+            if ($params.iModeTech -eq 0) {
+
+                # Write to the log file that RemoteDesktop is being activated
+                Write-Log -Message "Activation du bureau distant" -Log $params.hLog
+
+                # Change the state of the button to "Patienter"
+                Change-ButtonState -ID $params.iIDAction -State "Patienter"
+
+                # Check if a menu item exists for DWAgent
+                if ($params.aMenu.ContainsKey($params.sAgent)) {
+
+                    # Download and install DWAgent
+                    Install-DWAgent -Params $params
+                }
+                else {
+
+                    # Show a warning message that DWAgent is not part of BAO software and RemoteDesktop cannot be activated
+                    Show-WarningMessage "$params.sAgent ne fait pas parti des logiciels de BAO. Activation Bureau Distant impossible"
+
+                    # Write to the log file that DWAgent was not found in the config.ini file
+                    Write-Log -Message "$params.sAgent dans config.ini introuvable" -Log $params.hLog
+
+                    # Change the state of the button to "Desactiver"
+                    Change-ButtonState -ID $params.iIDAction -State "Desactiver"
+                }
+            }
+            else {
+
+                # Launch Chrome with the DWService login page as an argument
+                Start-Process -FilePath "chrome" -ArgumentList 'https://www.dwservice.net/fr/login.html'
+            }
+        }
+
+        # Update the edit control with the log file content
+        Update-GUIEditControl -ID $params.iIDEditLog -Log $params.hLog
+    }
+    else {
+
+        # Show a warning message that the email address must be specified in the config.ini file
+        Show-WarningMessage "L'adresse email de votre compte DWS doit être renseignée dans le fichier config.ini"
+
+        # Change the state of the button to "Desactiver"
+        Change-ButtonState -ID $params.iIDAction -State "Desactiver"
+    }
+}
+
+
 # Define the Install-DWAgent function
 function Install-DWAgent {
 
