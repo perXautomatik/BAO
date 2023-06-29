@@ -40,38 +40,29 @@ function Uninstall-DWAgent {
         Start-Process -FilePath "$env:LOCALAPPDATA\bao\tmp\dwaglnc.exe" -ArgumentList 'remove "' + $programFilesDir + '\DWAgent"' -Wait
     }
 }
-function Invoke-RemoteDesktop ($ModeTech) 
-    {
 
-    # Get the Program Files directory from the registry
-    $programFilesDir = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion" -Name "ProgramFilesDir").ProgramFilesDir
+# This script defines several functions for creating and controlling a remote desktop session using DWAgent.
 
-    # Read the email address of the DWService account from the config.ini file
-    $sMailBD = (Get-Content -Path ".\config.ini" | Select-String -Pattern "MailBD=").Line.Split("=")[1]
+# Define the Invoke-RemoteDesktop function
+function Invoke-RemoteDesktop {
 
-    # Check if the email address is not empty
-    if ($sMailBD -ne "") {
+    # Get the parameters from the config.ini file
+    $params = Get-ConfigParameters
 
-        # Read the name of the DWAgent program from the config.ini file
-        $sAgent = (Get-Content -Path ".\config.ini" | Select-String -Pattern "Agent=").Line.Split("=")[1]
-
-        # Read the name of the computer from the config.ini file
-        $sNom = (Get-Content -Path ".\config.ini" | Select-String -Pattern "Nom=").Line.Split("=")[1]
+    # Check if the email address of the DWService account is specified
+    if ($params.sMailBD -ne "") {
 
         # Check if the technical mode is off and if the DWAgent program exists on the system
-        if (($ModeTech -eq 0) -and (Test-Path -Path "$programFilesDir\$sAgent\runtime\dwagent.exe")) {
+        if (($params.iModeTech -eq 0) -and (Test-Path -Path "$params.programFilesDir\$params.sAgent\runtime\dwagent.exe")) {
 
             # Check if a cache file exists for RemoteDesktop
             if (Test-Path -Path ".\Cache\BureauDistant") {
 
-                # Write to the log file that DWAgent is being uninstalled
-                Write-Log -Message "Désinstallation DWAgent"
-
                 # Uninstall DWAgent
-                Uninstall-DWAgent
+                Uninstall-DWAgent -Params $params
 
                 # Change the state of the button to "Desactiver"
-                Change-ButtonState -ID $iIDAction -State "Desactiver"
+                Change-ButtonState -ID $params.iIDAction -State "Desactiver"
 
                 # Write to the cache file that RemoteDesktop is disabled
                 Set-Content -Path ".\Cache\BureauDistant" -Value "-1"
@@ -79,13 +70,13 @@ function Invoke-RemoteDesktop ($ModeTech)
             else {
 
                 # Write to the log file that DWAgent is already installed and activate the button "Bureau Distant"
-                Write-Log -Message "DWAgent déjà installé, activation du bouton 'Bureau Distant'"
+                Write-Log -Message "DWAgent déjà installé, activation du bouton 'Bureau Distant'" -Log $params.hLog
 
                 # Write to the cache file that RemoteDesktop is enabled
                 Set-Content -Path ".\Cache\BureauDistant" -Value "1"
 
                 # Change the state of the button to "Activer"
-                Change-ButtonState -ID $iIDAction -State "Activer"
+                Change-ButtonState -ID $params.iIDAction -State "Activer"
 
                 # Disable the background image
                 Disable-BackgroundImage
@@ -94,181 +85,158 @@ function Invoke-RemoteDesktop ($ModeTech)
         else {
 
             # Check if the technical mode is off
-            if ($ModeTech -eq 0) {
+            if ($params.iModeTech -eq 0) {
 
                 # Write to the log file that RemoteDesktop is being activated
-                Write-Log -Message "Activation du bureau distant"
+                Write-Log -Message "Activation du bureau distant" -Log $params.hLog
 
                 # Change the state of the button to "Patienter"
-                Change-ButtonState -ID $iIDAction -State "Patienter"
+                Change-ButtonState -ID $params.iIDAction -State "Patienter"
 
                 # Check if a menu item exists for DWAgent
-                if ($aMenu.ContainsKey($sAgent)) {
+                if ($params.aMenu.ContainsKey($params.sAgent)) {
 
-                    # Download DWAgent
-                    if (Download-DWAgent) {
+                    # Download and install DWAgent
+                    Install-DWAgent -Params $params
+                }
+                else {
 
-                        # Declare some variables for storing the password and whether to save it or not
-                        $sMdp = ""
-                        $bSVGMdp = 0
+                    # Show a warning message that DWAgent is not part of BAO software and RemoteDesktop cannot be activated
+                    Show-WarningMessage "$params.sAgent ne fait pas parti des logiciels de BAO. Activation Bureau Distant impossible"
 
-                        # Check if a password file exists in the cache folder
-                        if (Test-Path -Path ".\Cache\Pwd\dws.sha") {
+                    # Write to the log file that DWAgent was not found in the config.ini file
+                    Write-Log -Message "$params.sAgent dans config.ini introuvable" -Log $params.hLog
 
-                            # Decrypt and read the password from the file using a key derived from various system information
-                            $sMdp = [System.Text.Encoding]::Unicode.GetString(Decrypt-Data (Get-Content -Path ".\Cache\Pwd\dws.sha") ($sMailBD + [Environment]::MachineName + [Environment]::UserName + [Environment]::UserDomainName + [Environment]::UserInteractive + [Environment]::OSVersion + [Environment]::ProcessorCount + [Environment]::SystemPageSize + [Environment]::SystemDirectory + [Environment]::TickCount64))
-                        }
-                        else {
+                    # Change the state of the button to "Desactiver"
+                    Change-ButtonState -ID $params.iIDAction -State "Desactiver"
+                }
+            }
+            else {
 
-                            # Create a GUI for entering and saving the password for DWService
-                            $hGUIDWS = New-GUIForm -Title "Activation du bureau distant" -Width 400 -Height 105
-                            New-GUILabel -Text 'Saisissez le mot de passe DWService pour "' + $sMailBD + '" :' -Left 10 -Top 15
-                            $iPWD = New-GUITextBox -Left 10 -Top 42 -Width 200 -Height 20 -Password
-                            $iMem = New-GUICheckBox -Text "Mémoriser le mot de passe ?" -Left 220 -Top 40
-                            $iIDValider = New-GUIButton -Text "Valider" -Left 125 -Top 70 -Width 150 -Height 25
+                # Launch Chrome with the DWService login page as an argument
+                Start-Process -FilePath "chrome" -ArgumentList 'https://www.dwservice.net/fr/login.html'
+            }
+        }
 
-                            # Show the GUI and wait for user input
-                            Show-GUIForm
+        # Update the edit control with the log file content
+        Update-GUIEditControl -ID $params.iIDEditLog -Log $params.hLog
+    }
+    else {
 
-                            while ($true) {
+        # Show a warning message that the email address must be specified in the config.ini file
+        Show-WarningMessage "L'adresse email de votre compte DWS doit être renseignée dans le fichier config.ini"
 
-                                # Get the user input
-                                $iIdDWS = Read-GUIMessage
+        # Change the state of the button to "Desactiver"
+        Change-ButtonState -ID $params.iIDAction -State "Desactiver"
+    }
+}
 
-                                # Switch on the user input
-                                switch ($iIdDWS) {
+# Define the Get-ConfigParameters function
+function Get-ConfigParameters {
 
-                                    # If the user closes the GUI, exit the loop
-                                    $GUI_EVENT_CLOSE {
-                                        break
-                                    }
+    # Declare an object to store the parameters
+    $params = New-Object PSObject
 
-                                    # If the user clicks the "Valider" button, get the password and whether to save it or not, and exit the loop
-                                    $iIDValider {
-                                        if ((Get-GUITextBoxText -ID $iPWD) -ne "") {
-                                            $sMdp = Get-GUITextBoxText -ID $iPWD
-                                        }
+    # Get the Program Files directory from the registry
+    $programFilesDir = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion" -Name "ProgramFilesDir").ProgramFilesDir
 
-                                        if (Get-GUICheckBoxState -ID $iMem) {
-                                            $bSVGMdp = 1
-                                        }
-                                        break
-                                    }
-                                }
-                            }
+    # Add it to the object as a property
+    $params | Add-Member NoteProperty programFilesDir $programFilesDir
 
-                            # Delete the GUI
-                            Remove-GUIForm
-                        }
+    # Read some variables from the config.ini file and add them to the object as properties
+    $params | Add-Member NoteProperty sMailBD ((Get-Content -Path ".\config.ini" | Select-String -Pattern "MailBD=").Line.Split("=")[1])
+    $params | Add-Member NoteProperty sAgent ((Get-Content -Path ".\config.ini" | Select-String -Pattern "Agent=").Line.Split("=")[1])
+    $params | Add-Member NoteProperty sNom ((Get-Content -Path ".\config.ini" | Select-String -Pattern "Nom=").Line.Split("=")[1])
+    $params | Add-Member NoteProperty iModeTech ((Get-Content -Path ".\config.ini" | Select-String -Pattern "ModeTech=").Line.Split("=")[1])
 
-             
-                        # Check if the password is not empty
-                        if ($sMdp -ne "") {
+    # Read the menu items from the config.ini file and add them to the object as a property
+    $aMenu = @{}
+    foreach ($line in (Get-Content -Path ".\config.ini" | Select-String -Pattern "Menu=")) {
+        $key = $line.Line.Split("=")[1]
+        $value = $line.Line.Split("=")[2]
+        $aMenu.Add($key, $value)
+    }
+    $params | Add-Member NoteProperty aMenu $aMenu
 
-                            # Write to the log file that DWAgent is being installed
-                            Write-Log -Message "Installation de DWAgent"
+    # Return the object with the parameters
+    return $params
+}
 
-                            # If the password is to be saved, encrypt and write it to a file using a key derived from various system information
-                            if ($bSVGMdp -eq 1) {
-                                Encrypt-Data ($sMdp) ($sMailBD + [Environment]::MachineName + [Environment]::UserName + [Environment]::UserDomainName + [Environment]::UserInteractive + [Environment]::OSVersion + [Environment]::ProcessorCount + [Environment]::SystemPageSize + [Environment]::SystemDirectory + [Environment]::TickCount64) | Set-Content -Path ".\Cache\Pwd\dws.sha"
-                            }
+# Define the Install-DWAgent function
+function Install-DWAgent {
 
-                            # Update the status bar with "Installation de DWAgent"
-                            Set-GUIStatusBarText -Text " Installation de DWAgent"
-                            Set-GUIStatusBarProgress -Value 20
+    # Get the parameters from the argument
+    param (
+        [Parameter(Mandatory=$true)]
+        [PSObject]$Params
+    )
 
-                            # Run DWAgent with the email and password as arguments
-                            Start-Process -FilePath $sProgrun -ArgumentList "-silent user=$sMailBD password=$sMdp name='$sNom'" -Wait
+    # Download DWAgent
+    if (Download-DWAgent -Params $Params) {
 
-                            # Check for errors
-                            if ($LASTEXITCODE -ne 0) {
+        # Declare some variables for storing the password and whether to save it or not
+        $sMdp = ""
+        $bSVGMdp = 0
 
-                                # Show a warning message that DWAgent could not be installed
-                                Show-WarningMessage "Impossible d'installer DWAgent"
+        # Check if a password file exists in the cache folder
+        if (Test-Path -Path ".\Cache\Pwd\dws.sha") {
 
-                                # Clear the status bar and progress bar
-                                Set-GUIStatusBarText -Text ""
-                                Set-GUIStatusBarProgress -Value 0
+            # Decrypt and read the password from the file using a key derived from various system information
+            $sMdp = [System.Text.Encoding]::Unicode.GetString(Decrypt-Data (Get-Content -Path ".\Cache\Pwd\dws.sha") ($Params.sMailBD + [Environment]::MachineName + [Environment]::UserName + [Environment]::UserDomainName + [Environment]::UserInteractive + [Environment]::OSVersion + [Environment]::ProcessorCount + [Environment]::SystemPageSize + [Environment]::SystemDirectory + [Environment]::TickCount64))
+        }
+        else {
 
-                                # Change the state of the button to "Desactiver"
-                                Change-ButtonState -ID $iIDAction -State "Desactiver"
-                            }
-                            else {
+            # Create a GUI for entering and saving the password for DWService
+            $hGUIDWS = New-GUIForm -Title "Activation du bureau distant" -Width 400 -Height 105
+            New-GUILabel -Text 'Saisissez le mot de passe DWService pour "' + $Params.sMailBD + '" :' -Left 10 -Top 15
+            $iPWD = New-GUITextBox -Left 10 -Top 42 -Width 200 -Height 20 -Password
+            $iMem = New-GUICheckBox -Text "Mémoriser le mot de passe ?" -Left 220 -Top 40
+            $iIDValider = New-GUIButton -Text "Valider" -Left 125 -Top 70 -Width 150 -Height 25
 
-                                # Update the progress bar to 100%
-                                Set-GUIStatusBarProgress -Value 100
+            # Show the GUI and wait for user input
+            Show-GUIForm
 
-                                # Wait for 2 seconds
-                                Start-Sleep -Seconds 2
+            while ($true) {
 
-                                # Clear the status bar and progress bar
-                                Set-GUIStatusBarText -Text ""
-                                Set-GUIStatusBarProgress -Value 0
+                # Get the user input
+                $iIdDWS = Read-GUIMessage
 
-                                # Change the state of the button to "Activer"
-                                Change-ButtonState -ID $iIDAction -State "Activer"
+                # Switch on the user input
+                switch ($iIdDWS) {
 
-                                # Write to the cache file that RemoteDesktop is enabled
-                                Set-Content -Path ".\Cache\BureauDistant" -Value "1"
+                    # If the user closes the GUI, exit the loop
+                    $GUI_EVENT_CLOSE {
+                        break
+                    }
 
-                                # Disable the background image
-                                Disable-BackgroundImage
-                            }
-                        }
-                        else {
-
-                            # Change the state of the button to "Desactiver"
-                            Change-ButtonState -ID $iIDAction -State "Desactiver"
-                        }
-
-                        # Check if DWAgent was downloaded successfully
-                        if (Download-DWAgent) {
-
-                            # Do nothing (the code above handles the installation)
-                        }
-                        else {
-
-                            # Show a warning message that DWAgent could not be downloaded
-                            Show-WarningMessage 'Echec du téléchargement de "DWAgent"'
-
-                            # Change the state of the button to "Desactiver"
-                            Change-ButtonState -ID $iIDAction -State "Desactiver"
+                    # If the user clicks the "Valider" button, get the password and whether to save it or not, and exit the loop
+                    $iIDValider {
+                        if ((Get-GUITextBoxText -ID $iPWD) -ne "") {
+                            $sMdp = Get-GUITextBoxText -ID $iPWD
                         }
 
-                        # Check if a menu item exists for DWAgent
-                        if ($aMenu.ContainsKey($sAgent)) {
-
-                            # Do nothing (the code above handles the download and installation)
+                        if (Get-GUICheckBoxState -ID $iMem) {
+                            $bSVGMdp = 1
                         }
-                        else {
+                        break
+                    }
+                }
+            }
 
-                            # Show a warning message that DWAgent is not part of BAO software and RemoteDesktop cannot be activated
-                            Show-WarningMessage "$sAgent ne fait pas parti des logiciels de BAO. Activation Bureau Distant impossible"
+            # Delete the GUI
+            Remove-GUIForm
+        }
 
-                            # Write to the log file that DWAgent was not found in the config.ini file
-                            Write-Log -Message "$sAgent dans config.ini introuvable"
+        # Check if the password is not empty
+        if ($sMdp -ne "") {
 
-                            # Change the state of the button to "Desactiver"
-                            Change-ButtonState -ID $iIDAction -State "Desactiver"
-                        }
+            # Write to the log file that DWAgent is being installed
+            Write-Log -Message "Installation de DWAgent" -Log $Params.hLog
 
-                        # Check if the technical mode is on
-                        if ($ModeTech -eq 1) {
-
-                            # Launch Chrome with the DWService login page as an argument
-                            Start-Process -FilePath "chrome" -ArgumentList 'https://www.dwservice.net/fr/login.html'
-                        }
-
-                        # Update the edit control with the log file content
-                        Update-GUIEditControl -ID $iIDEditLog -Log $hLog
-
-                        # Check if the email address of the DWService account is specified in the config.ini file
-                        if ($sMailBD -eq "") {
-
-                            # Show a warning message that the email address must be specified in the config.ini file
-                            Show-WarningMessage "L'adresse email de votre compte DWS doit être renseignée dans le fichier config.ini"
-
-                            # Change the state of the button to "Desactiver"
-                            Change-ButtonState -ID $iIDAction -State "Desactiver"
-                        }
-
+            # If the password is to be saved, encrypt and write it to a file using a key derived from various system information
+            if ($bSVGMdp -eq 1) {
+                Encrypt-Data ($sMdp) ($Params.sMailBD + [Environment]::MachineName + [Environment]::UserName + [Environment]::UserDomainName + [Environment]::UserInteractive 
+            }
+        }
+    }
+}
